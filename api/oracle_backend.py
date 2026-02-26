@@ -1498,10 +1498,11 @@ def exportar_txt():
 # ===================================================================
 
 if __name__ == '__main__':
+    import os
+    
     print("="*60)
     print("🧠 THE ORACLE - Backend MEJORADO v4.2 ULTRA")
     print("="*60)
-    print(f"📡 Servidor: http://0.0.0.0:5000 (local) / Puerto dinámico en Render")
     print(f"🎭 Personajes: {len(PERSONAJES)}")
     print(f"✨ Analizador: Regex + 80+ patrones (conquistador, general, político)")
     print(f"🎯 Sugerencias: DINÁMICAS y CONTEXTUALES (con inferencia de negativos)")
@@ -1509,11 +1510,9 @@ if __name__ == '__main__':
     print(f"✅ MODO PERFILADO ACTIVADO (a partir de 12 preguntas)")
     print(f"✅ GÉNERO APLICADO en sugerencias (masculino/femenino)")
     print(f"✅ PISTAS SECUENCIALES (no aleatorias)")
-    print(f"✅ Compatible con frontend actual")
     print("="*60)
     
-    # Para producción con Gunicorn
-if __name__ == '__main__':
-    import os
+    # Puerto para producción (Render asigna automáticamente)
     port = int(os.environ.get('PORT', 10000))
+    print(f"📡 Iniciando servidor en puerto: {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
