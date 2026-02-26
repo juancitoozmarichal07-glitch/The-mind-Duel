@@ -1512,6 +1512,8 @@ if __name__ == '__main__':
     print(f"✅ Compatible con frontend actual")
     print("="*60)
     
-    # Puerto para producción (Render asigna automáticamente)
-    port = int(os.environ.get('PORT', 5000))  # 5000 es el valor por defecto local
+    # Para producción con Gunicorn
+if __name__ == '__main__':
+    import os
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
