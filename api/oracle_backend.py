@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 THE ORACLE - Backend MEJORADO v4.2 ULTRA-COMPATIBLE
-Versión: Analizador Astuto + Sugerencias Dinámicas MEJORADAS + Modo Perfilado
+Versión: Analizador Astuto + Sugerencias Dinámicas MEJORADAS + Modo Perfilado + Género en sugerencias
 - ✅ Analizador con REGEX para variaciones lingüísticas
 - ✅ Sistema de sugerencias DINÁMICO, CONTEXTUAL e INTELIGENTE
 - ✅ Modo perfilado activable por nivel de información
 - ✅ Diferenciación estricta Real vs Ficticio
+- ✅ Pistas secuenciales (no aleatorias)
+- ✅ Género aplicado correctamente en sugerencias (masculino/femenino)
 - ✅ 100% COMPATIBLE con frontend existente
 - ✅ Dashboard completo
 """
@@ -453,9 +455,54 @@ class AnalizadorPreguntas:
             pacifista = personaje.get('perfil_moral', {}).get('pacifista', False)
             return {'answer': 'Sí' if pacifista else 'No', 'clarification': ''}
         
+        # NUEVO: CONQUISTADOR
+        if re.search(r'\b(conquistador|conquistadora|conquisto)\b', pregunta_norm):
+            conquistador = personaje.get('perfil_moral', {}).get('conquistador', False)
+            return {'answer': 'Sí' if conquistador else 'No', 'clarification': ''}
+        
+        # NUEVO: IMPERIALISTA
+        if re.search(r'\b(imperialista|imperio)\b', pregunta_norm):
+            imperialista = personaje.get('perfil_moral', {}).get('imperialista', False)
+            return {'answer': 'Sí' if imperialista else 'No', 'clarification': ''}
+        
+        # NUEVO: LUCHÓ POR LA LIBERTAD
         if re.search(r'\b(lucho por la libertad|luchador de la libertad|defensor de la libertad)\b', pregunta_norm):
             lucho = personaje.get('perfil_moral', {}).get('lucho_libertad', False)
             return {'answer': 'Sí' if lucho else 'No', 'clarification': ''}
+        
+        # ========== ROL ==========
+        if re.search(r'\b(lider|líder)\b', pregunta_norm):
+            lider = personaje.get('rol', {}).get('lider', False)
+            return {'answer': 'Sí' if lider else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(gobernante|goberno)\b', pregunta_norm):
+            gobernante = personaje.get('rol', {}).get('gobernante', False)
+            return {'answer': 'Sí' if gobernante else 'No', 'clarification': ''}
+        
+        # NUEVO: GENERAL
+        if re.search(r'\b(general|general del ejercito|comandante)\b', pregunta_norm):
+            general = personaje.get('rol', {}).get('general', False)
+            return {'answer': 'Sí' if general else 'No', 'clarification': ''}
+        
+        # NUEVO: POLÍTICO
+        if re.search(r'\b(politico|política|político)\b', pregunta_norm):
+            politico = personaje.get('rol', {}).get('ocupo_cargo_politico', False)
+            return {'answer': 'Sí' if politico else 'No', 'clarification': ''}
+        
+        # NUEVO: INVENTOR
+        if re.search(r'\b(inventor|inventora|invento)\b', pregunta_norm):
+            inventor = personaje.get('rol', {}).get('es_inventor', False)
+            return {'answer': 'Sí' if inventor else 'No', 'clarification': ''}
+        
+        # NUEVO: HÉROE
+        if re.search(r'\b(heroe|héroe|heroina|heroína)\b', pregunta_norm):
+            heroe = personaje.get('rol', {}).get('heroe', False)
+            return {'answer': 'Sí' if heroe else 'No', 'clarification': ''}
+        
+        # NUEVO: ANTAGONISTA
+        if re.search(r'\b(antagonista|enemigo)\b', pregunta_norm):
+            antagonista = personaje.get('rol', {}).get('antagonista', False)
+            return {'answer': 'Sí' if antagonista else 'No', 'clarification': ''}
         
         # ========== IDEOLOGÍA ==========
         if re.search(r'\b(liberal|progresista)\b', pregunta_norm):
@@ -465,6 +512,16 @@ class AnalizadorPreguntas:
         if re.search(r'\b(conservador|conservadora)\b', pregunta_norm):
             conservador = personaje.get('ideologia', {}).get('conservador', False)
             return {'answer': 'Sí' if conservador else 'No', 'clarification': ''}
+        
+        # ========== HABILIDADES ESPECIALES ==========
+        if re.search(r'\b(habilidades especiales|habilidades especiales)\b', pregunta_norm):
+            especiales = personaje.get('habilidades', {}).get('tiene_habilidades_especiales', False)
+            return {'answer': 'Sí' if especiales else 'No', 'clarification': ''}
+        
+        # ========== FUERZA SOBREHUMANA ==========
+        if re.search(r'\b(fuerza sobrehumana|superfuerza)\b', pregunta_norm):
+            fuerza = personaje.get('habilidades', {}).get('fuerza_sobrehumana', False)
+            return {'answer': 'Sí' if fuerza else 'No', 'clarification': ''}
         
         # NO CLASIFICABLE
         registrar_hueco(pregunta, personaje, pregunta_norm)
@@ -606,6 +663,7 @@ class GeneradorSugerencias:
             "¿Fue un general?",
             "¿Fue presidente?",
             "¿Fue rey o reina?",
+            "¿Fue un conquistador?",
         ],
         
         'real_moral': [
@@ -632,7 +690,7 @@ class GeneradorSugerencias:
             "¿Es de un cómic?",
         ],
         
-        'ficticio_tipo': [
+        'ficticio_tipo_masculino': [
             "¿Es un superhéroe?",
             "¿Es un villano?",
             "¿Es un mago?",
@@ -642,7 +700,27 @@ class GeneradorSugerencias:
             "¿Es un antagonista?",
         ],
         
-        'ficticio_poderes': [
+        'ficticio_tipo_femenino': [
+            "¿Es una superheroína?",
+            "¿Es una villana?",
+            "¿Es una maga?",
+            "¿Es una detective?",
+            "¿Es una guerrera?",
+            "¿Es la protagonista?",
+            "¿Es una antagonista?",
+        ],
+        
+        'ficticio_poderes_masculino': [
+            "¿Tiene superpoderes?",
+            "¿Puede volar?",
+            "¿Es inmortal?",
+            "¿Tiene fuerza sobrehumana?",
+            "¿Tiene habilidades especiales?",
+            "¿Usa magia?",
+            "¿Tiene poderes mentales?",
+        ],
+        
+        'ficticio_poderes_femenino': [
             "¿Tiene superpoderes?",
             "¿Puede volar?",
             "¿Es inmortal?",
@@ -980,13 +1058,16 @@ class GeneradorSugerencias:
         
         # === PARA PERSONAJES FICTICIOS ===
         elif tipo == 'ficticio':
-            # Tipo específico (si no se conoce)
+            # Tipo específico (si no se conoce) - con género
             if not conocimiento['tipo_ficticio_conocido']:
-                perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_tipo'])
+                if conocimiento['genero'] == 'femenino':
+                    perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_tipo_femenino'])
+                else:
+                    perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_tipo_masculino'])
             
-            # Poderes (si no se conocen)
+            # Poderes (si no se conocen) - neutro
             if not conocimiento['poderes_conocidos']:
-                perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_poderes'])
+                perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_poderes_masculino'])  # Neutro
             
             # Armas (si no se conocen)
             if not conocimiento['armas_conocidas']:
@@ -1135,23 +1216,26 @@ class GeneradorSugerencias:
                 else:
                     candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_universo'])
             
-            # Tipo de personaje ficticio (si no se conoce)
+            # Tipo de personaje ficticio (si no se conoce) - CON GÉNERO
             if not conocimiento['tipo_ficticio_conocido']:
-                candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_tipo'])
+                if conocimiento['genero'] == 'femenino':
+                    candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_tipo_femenino'])
+                else:
+                    candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_tipo_masculino'])
             
-            # Poderes
+            # Poderes (si no se conocen) - neutro
             if not conocimiento['poderes_conocidos']:
-                candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_poderes'])
+                candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_poderes_masculino'])  # Neutro
             
-            # Armas
+            # Armas (si no se conocen)
             if not conocimiento['armas_conocidas']:
                 candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_armas'])
             
-            # Especie
+            # Especie (si no se conoce)
             if not conocimiento['especie_conocida']:
                 candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_especie'])
             
-            # Formato
+            # Formato (si no se conoce)
             if not conocimiento['formato_conocido']:
                 candidatas.extend(GeneradorSugerencias.PREGUNTAS['formato'])
             
@@ -1325,7 +1409,16 @@ def oracle_endpoint():
                 return jsonify({'hint': 'No hay partida activa'})
             
             pistas = current_game['character'].get('pistas', [])
-            hint = random.choice(pistas) if pistas else 'No hay pistas disponibles'
+            hint_level = data.get('hint_level', 1)
+            
+            # CORREGIDO: Usar hint_level en lugar de random.choice
+            if hint_level == 1 and len(pistas) > 0:
+                hint = pistas[0]
+            elif hint_level == 2 and len(pistas) > 1:
+                hint = pistas[1]
+            else:
+                hint = "No hay más pistas disponibles."
+            
             return jsonify({'hint': hint})
         
         # ===== GUESS =====
@@ -1410,13 +1503,15 @@ if __name__ == '__main__':
     print("="*60)
     print(f"📡 Servidor: http://0.0.0.0:5000")
     print(f"🎭 Personajes: {len(PERSONAJES)}")
-    print(f"✨ Analizador: Regex + 70+ patrones")
+    print(f"✨ Analizador: Regex + 80+ patrones (conquistador, general, político)")
     print(f"🎯 Sugerencias: DINÁMICAS y CONTEXTUALES (con inferencia de negativos)")
     print(f"🔥 Diferenciación: Real vs Ficticio + Tipo de personaje")
     print(f"✅ MODO PERFILADO ACTIVADO (a partir de 12 preguntas)")
+    print(f"✅ GÉNERO APLICADO en sugerencias (masculino/femenino)")
+    print(f"✅ PISTAS SECUENCIALES (no aleatorias)")
     print(f"✅ Compatible con frontend actual")
     print("="*60)
     
-# Puerto para producción
+    # Puerto para producción
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
