@@ -1533,16 +1533,73 @@ def health():
 
 @app.route('/api/dashboard/stats', methods=['GET'])
 def dashboard_stats():
-    return jsonify(metricas_manager.metricas)
+    """Endpoint mejorado con estadísticas calculadas"""
+    try:
+        metricas = metricas_manager.metricas
+        
+        # Calcular tasa de victoria
+        total = metricas.get('partidas_totales', 0)
+        ganadas = metricas.get('partidas_ganadas', 0)
+        tasa_victoria = round((ganadas / total * 100), 2) if total > 0 else 0
+        
+        # Top 10 personajes más usados
+        personajes_usados = metricas.get('personajes_usados', {})
+        mas_usados = sorted(personajes_usados.items(), key=lambda x: x[1], reverse=True)[:10]
+        
+        # Top 10 personajes menos usados
+        menos_usados = sorted(personajes_usados.items(), key=lambda x: x[1])[:10]
+        
+        return jsonify({
+            'partidas_totales': total,
+            'partidas_ganadas': ganadas,
+            'partidas_perdidas': metricas.get('partidas_perdidas', 0),
+            'tasa_victoria': tasa_victoria,
+            'preguntas_totales': metricas.get('preguntas_totales', 0),
+            'personajes_mas_usados': mas_usados,
+            'personajes_menos_usados': menos_usados,
+            'preguntas_frecuentes': metricas.get('preguntas_frecuentes', {}),
+            'tasa_exito_por_personaje': metricas.get('tasa_exito_por_personaje', {})
+        })
+    except Exception as e:
+        print(f"Error en dashboard_stats: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/dashboard/huecos', methods=['GET'])
 def dashboard_huecos():
-    huecos = []
-    if os.path.exists(REGISTRO_HUECOS_FILE):
-        with open(REGISTRO_HUECOS_FILE, 'r', encoding='utf-8') as f:
-            huecos = json.load(f)
-    return jsonify({'huecos': huecos})
+    """Endpoint mejorado con análisis de huecos"""
+    try:
+        huecos = []
+        if os.path.exists(REGISTRO_HUECOS_FILE):
+            with open(REGISTRO_HUECOS_FILE, 'r', encoding='utf-8') as f:
+                huecos = json.load(f)
+        
+        # Contar preguntas más frecuentes
+        preguntas_counter = Counter()
+        personajes_counter = Counter()
+        
+        for hueco in huecos:
+            pregunta = hueco.get('pregunta_normalizada', hueco.get('pregunta', ''))
+            personaje = hueco.get('personaje', 'Desconocido')
+            preguntas_counter[pregunta] += 1
+            personajes_counter[personaje] += 1
+        
+        # Top 20 preguntas más frecuentes
+        preguntas_frecuentes = preguntas_counter.most_common(20)
+        
+        # Top 10 personajes más problemáticos
+        personajes_problematicos = personajes_counter.most_common(10)
+        
+        return jsonify({
+            'total': len(huecos),
+            'huecos': huecos,
+            'preguntas_frecuentes': preguntas_frecuentes,
+            'personajes_problematicos': personajes_problematicos,
+            'ultimos': huecos[-50:] if len(huecos) > 50 else huecos
+        })
+    except Exception as e:
+        print(f"Error en dashboard_huecos: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/dashboard/exportar-txt', methods=['GET'])
@@ -1563,6 +1620,64 @@ def exportar_txt():
     response.headers['Content-Type'] = 'text/plain; charset=utf-8'
     response.headers['Content-Disposition'] = f'attachment; filename=oracle_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
     return response
+
+
+@app.route('/api/dashboard/personajes', methods=['GET'])
+def dashboard_personajes():
+    """Endpoint para obtener estadísticas de todos los personajes"""
+    try:
+        personajes_stats = []
+        personajes_usados = metricas_manager.metricas.get('personajes_usados', {})
+        tasa_exito = metricas_manager.metricas.get('tasa_exito_por_personaje', {})
+        
+        # Crear lista de personajes con sus estadísticas
+        for personaje in PERSONAJES:
+            nombre = personaje.get('nombre', 'Desconocido')
+            veces_usado = personajes_usados.get(nombre, 0)
+            
+            # Obtener tasa de éxito
+            exito = tasa_exito.get(nombre, {'ganadas': 0, 'perdidas': 0})
+            ganadas = exito.get('ganadas', 0)
+            perdidas = exito.get('perdidas', 0)
+            total_partidas = ganadas + perdidas
+            porcentaje = round((ganadas / total_partidas * 100), 2) if total_partidas > 0 else 0
+            
+            personajes_stats.append({
+                'nombre': nombre,
+                'tipo': personaje.get('tipo', 'desconocido'),
+                'genero': personaje.get('genero', 'desconocido'),
+                'veces_usado': veces_usado,
+                'partidas_ganadas': ganadas,
+                'partidas_perdidas': perdidas,
+                'porcentaje_victoria': porcentaje
+            })
+        
+        # Ordenar por veces usado (descendente)
+        personajes_stats.sort(key=lambda x: x['veces_usado'], reverse=True)
+        
+        return jsonify({
+            'personajes': personajes_stats,
+            'total': len(personajes_stats)
+        })
+    except Exception as e:
+        print(f"Error en dashboard_personajes: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dashboard/errores', methods=['GET'])
+def dashboard_errores():
+    """Endpoint para obtener errores del sistema"""
+    try:
+        errores = metricas_manager.metricas.get('errores', [])
+        
+        return jsonify({
+            'total': len(errores),
+            'errores': errores,
+            'ultimos': errores[-50:] if len(errores) > 50 else errores
+        })
+    except Exception as e:
+        print(f"Error en dashboard_errores: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 # ===================================================================
@@ -1957,15 +2072,17 @@ def dashboard():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🧠 THE ORACLE - Backend MEJORADO v4.2 ULTRA")
+    print("🧠 THE ORACLE - Backend MEJORADO v4.2 ULTRA [RENDER]")
     print("=" * 60)
-    print(f"📡 Servidor: http://0.0.0.0:5000")
+    print(f"📡 Servidor: http://0.0.0.0:{os.environ.get('PORT', 10000)}")
     print(f"🎭 Personajes: {len(PERSONAJES)}")
-    print(f"📊 Dashboard: http://0.0.0.0:5000/dashboard")
+    print(f"📊 Dashboard: /dashboard")
     print("✅ Sistema de métricas ACTIVADO")
     print("✅ Analizador con 60+ patrones")
+    print("✅ Modo PRODUCCIÓN (debug=False)")
     print("=" * 60)
     
-    # PUERTO PARA RENDER (CORREGIDO)
+    # PUERTO PARA RENDER (dinámico desde variable de entorno)
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
