@@ -7,7 +7,7 @@
 const config = {
     questionsLimit: 20,
     typewriterSpeed: 20,
-    backendURL: 'https://the-oracle-game.onrender.com/api/oracle',
+    backendURL: 'http://127.0.0.1:5000/api/oracle',
     suggestionsAfterQuestion: 2,
     hintsAfterQuestion: 5,
     maxHints: 2
@@ -189,7 +189,16 @@ let state = {
     lastQuestion: null,
     incomprehensibleCount: 0,
     timerInterval: null,
-    timerSeconds: 0
+    timerSeconds: 0,
+    // Variables para control de sugerencias
+    suggestionsLocked: false,
+    suggestionsUsed: 0,
+    maxSuggestions: 5,
+    refreshCount: 0,
+    maxRefresh: 3,
+    lastSuggestions: [],
+    wasPopupOpened: false,      // Indica si el popup ya fue abierto en el ciclo actual
+    currentSuggestions: []       // Sugerencias actuales para mostrar
 };
 
 // --- ELEMENTOS DOM ---
@@ -327,21 +336,28 @@ async function askQuestion() {
         const data = await response.json();
         const fullAnswer = data.clarification ? `${data.answer} ${data.clarification}` : data.answer;
         
+        // Siempre mostrar la respuesta
+        addMessageWithBubble(fullAnswer, 'brain');
+        
         if (data.answer === 'No lo sé' && data.clarification && data.clarification.includes('reformula')) {
             state.incomprehensibleCount++;
             if (state.incomprehensibleCount >= 2) {
-                addMessageWithBubble(fullAnswer + ' ¿Necesitas sugerencias?', 'brain');
+                addMessageWithBubble('¿Necesitas sugerencias?', 'brain');
                 state.incomprehensibleCount = 0;
-            } else {
-                addMessageWithBubble(fullAnswer, 'brain');
             }
         } else {
-            addMessageWithBubble(fullAnswer, 'brain');
             state.questionCount++;
-            updateQuestionCounter();
-            updateButtonStates();
             state.incomprehensibleCount = 0;
         }
+        
+        updateQuestionCounter();
+        updateButtonStates();
+        
+        // Al hacer una nueva pregunta, reiniciamos el ciclo de sugerencias
+        state.refreshCount = 0;
+        state.lastSuggestions = [];
+        state.wasPopupOpened = false;
+        state.currentSuggestions = [];
         
     } catch (error) {
         console.error('Error:', error);
@@ -379,11 +395,51 @@ async function getSuggestions() {
         
         const data = await response.json();
         
+        // Si el backend indica que se alcanzó el límite
+        if (data.disabled) {
+            state.suggestionsLocked = true;
+            state.suggestionsUsed = state.maxSuggestions;
+            updateButtonStates();
+            addMessageWithBubble('Has agotado tus sugerencias para esta partida.', 'system');
+            return;
+        }
+        
         if (data.suggestions && data.suggestions.length > 0) {
-            showSuggestionsPopup(data.suggestions);
+            // Guardar las sugerencias actuales
+            state.currentSuggestions = data.suggestions;
+            
+            // Verificar si son nuevas respecto al último ciclo
+            const areNew = JSON.stringify(data.suggestions) !== JSON.stringify(state.lastSuggestions);
+            
+            if (areNew) {
+                // Nuevo ciclo: resetear contadores
+                state.refreshCount = 0;
+                state.wasPopupOpened = false;
+                state.lastSuggestions = data.suggestions;
+            }
+            
+            // Calcular cambios restantes (antes de actualizar)
+            let refreshesLeft = state.maxRefresh - state.refreshCount;
+            
+            // Mostrar el pop-up con las sugerencias actuales
+            showSuggestionsPopup(data.suggestions, refreshesLeft);
+            
+            // Actualizar contador de refrescos según corresponda
+            if (state.wasPopupOpened) {
+                // Ya fue abierto antes en este ciclo: descontar
+                if (state.refreshCount < state.maxRefresh) {
+                    state.refreshCount++;
+                }
+            } else {
+                // Primera vez en el ciclo: marcar como abierto pero no descontar
+                state.wasPopupOpened = true;
+            }
+            
         } else {
             addMessageWithBubble('No hay sugerencias disponibles en este momento.', 'system');
         }
+        
+        updateButtonStates();
         
     } catch (error) {
         console.error('Error:', error);
@@ -394,15 +450,16 @@ async function getSuggestions() {
 async function getHint() {
     playSound('button');
     if (!state.isGameActive) return;
-    if (state.questionCount < config.hintsAfterQuestion) {
-        addMessageWithBubble(`Las pistas están disponibles después de la pregunta ${config.hintsAfterQuestion}.`, 'system');
-        return;
-    }
+
+    // Verificar si ya se usaron todas las pistas
     if (state.hintsUsed >= config.maxHints) {
         addMessageWithBubble('Ya has usado todas las pistas disponibles.', 'system');
         return;
     }
-    
+
+    // Nivel de pista que se intenta (1 o 2)
+    const hintLevel = state.hintsUsed + 1;
+
     try {
         const response = await fetch(config.backendURL, {
             method: 'POST',
@@ -410,27 +467,39 @@ async function getHint() {
             body: JSON.stringify({
                 action: 'hint',
                 character: state.secretCharacter,
-                hint_level: state.hintsUsed + 1
+                hint_level: hintLevel
             })
         });
-        
+
         const data = await response.json();
-        
+
+        // Si la pista está bloqueada por número de preguntas
+        if (data.locked) {
+            if (hintLevel === 1) {
+                addMessageWithBubble('La primera pista estará disponible después de la pregunta 5.', 'system');
+            } else if (hintLevel === 2) {
+                addMessageWithBubble('LA SEGUNDA Y ÚLTIMA PISTA ESTARÁ DISPONIBLE A PARTIR DE LA PREGUNTA 10.', 'system');
+            }
+            return;
+        }
+
+        // Si hay pista, mostrarla
         if (data.hint) {
             state.hintsUsed++;
             addMessageWithBubble(`🔮 PISTA ${state.hintsUsed}/${config.maxHints}: ${data.hint}`, 'system');
             updateButtonStates();
         }
-        
+
     } catch (error) {
         console.error('Error:', error);
         addMessageWithBubble('Error al obtener pista.', 'system');
     }
 }
 
-function showSuggestionsPopup(suggestions) {
+function showSuggestionsPopup(suggestions, refreshesLeft) {
     playSound('button');
     el.suggestionsList.innerHTML = '';
+    
     suggestions.forEach(suggestion => {
         const item = document.createElement('div');
         item.className = 'suggestion-item';
@@ -439,10 +508,24 @@ function showSuggestionsPopup(suggestions) {
             playSound('button');
             el.questionInput.value = suggestion;
             closeSuggestionsPopup();
+            // Solo aquí incrementamos el contador de usos reales
+            if (state.suggestionsUsed < state.maxSuggestions) {
+                state.suggestionsUsed++;
+            }
+            updateButtonStates();
             el.questionInput.focus();
         };
         el.suggestionsList.appendChild(item);
     });
+    
+    // Añadir información de refrescos restantes
+    const refreshInfo = document.createElement('p');
+    refreshInfo.style.marginTop = '15px';
+    refreshInfo.style.fontSize = '0.8em';
+    refreshInfo.style.color = '#ff00ff';
+    refreshInfo.textContent = `Cambios restantes en este ciclo: ${refreshesLeft}`;
+    el.suggestionsList.appendChild(refreshInfo);
+    
     el.suggestionsPopup.classList.remove('hidden');
 }
 
@@ -481,10 +564,21 @@ async function confirmGuess() {
             })
         });
         
+        if (!response.ok) {
+            const errorData = await response.json();
+            if (errorData.error === 'must_ask_before_guess') {
+                addMessageWithBubble('Debes hacer al menos una pregunta antes de adivinar.', 'system');
+                return;
+            }
+            addMessageWithBubble('Error al verificar adivinanza.', 'system');
+            return;
+        }
+        
         const data = await response.json();
         endGame(data.correct, data.character);
         
     } catch (error) {
+        console.error(error);
         addMessageWithBubble('Error al verificar adivinanza.', 'system');
     }
 }
@@ -517,6 +611,12 @@ function resetGame() {
     state.lastQuestion = null;
     state.incomprehensibleCount = 0;
     state.timerSeconds = 0;
+    state.suggestionsLocked = false;
+    state.suggestionsUsed = 0;
+    state.refreshCount = 0;
+    state.lastSuggestions = [];
+    state.wasPopupOpened = false;
+    state.currentSuggestions = [];
     
     if (el.timerDisplay) el.timerDisplay.textContent = '00:00';
     el.questionCounter.textContent = `0/${config.questionsLimit}`;
@@ -528,6 +628,8 @@ function resetGame() {
     el.suggestionsBtn.disabled = true;
     el.hintsBtn.disabled = true;
     el.guessBtn.disabled = true;
+    
+    el.suggestionsBtn.textContent = 'SUGERENCIAS';
 }
 
 function updateQuestionCounter() {
@@ -535,8 +637,23 @@ function updateQuestionCounter() {
 }
 
 function updateButtonStates() {
-    el.suggestionsBtn.disabled = state.questionCount < config.suggestionsAfterQuestion;
+    // Botón de sugerencias
+    if (state.suggestionsLocked) {
+        el.suggestionsBtn.disabled = true;
+        el.suggestionsBtn.textContent = 'SUGERENCIAS (0/5)';
+    } else {
+        const remaining = state.maxSuggestions - state.suggestionsUsed;
+        if (remaining > 0) {
+            // Se habilita solo si ha pasado el mínimo de preguntas
+            el.suggestionsBtn.disabled = state.questionCount < config.suggestionsAfterQuestion;
+            el.suggestionsBtn.textContent = `SUGERENCIAS (${remaining}/5)`;
+        } else {
+            el.suggestionsBtn.disabled = true;
+            el.suggestionsBtn.textContent = 'SUGERENCIAS (0/5)';
+        }
+    }
     
+    // Botón de pistas
     if (state.questionCount >= config.hintsAfterQuestion && state.hintsUsed < config.maxHints) {
         el.hintsBtn.disabled = false;
         el.hintsBtn.textContent = `PISTAS (${config.maxHints - state.hintsUsed})`;
@@ -547,7 +664,8 @@ function updateButtonStates() {
             : 'PISTAS (0)';
     }
     
-    el.guessBtn.disabled = !state.isGameActive;
+    // Botón de adivinar: requiere al menos una pregunta
+    el.guessBtn.disabled = !state.isGameActive || state.questionCount < 1;
 }
 
 // === SISTEMA DE MENSAJES ===
