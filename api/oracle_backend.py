@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-THE ORACLE - Backend MEJORADO v4.2 ULTRA-COMPATIBLE
-Versión: Analizador Astuto + Sugerencias Dinámicas MEJORADAS + Modo Perfilado + Género en sugerencias
+THE ORACLE - Backend MEJORADO v4.3 ULTRA-COMPATIBLE + SISTEMA DE BALANCE
+Versión: Analizador Astuto + Sugerencias Jerárquicas + Nuevos Campos Semánticos + Control de Partida
 - ✅ Analizador con REGEX para variaciones lingüísticas
-- ✅ Sistema de sugerencias DINÁMICO, CONTEXTUAL e INTELIGENTE
+- ✅ Sistema de sugerencias jerárquico: formato → universo → específicas
 - ✅ Modo perfilado activable por nivel de información
 - ✅ Diferenciación estricta Real vs Ficticio
-- ✅ Pistas secuenciales (no aleatorias)
+- ✅ Pistas secuenciales (no aleatorias) con desbloqueo por turnos
 - ✅ Género aplicado correctamente en sugerencias (masculino/femenino)
 - ✅ 100% COMPATIBLE con frontend existente
 - ✅ Dashboard completo
+- ✅ Límite de usos de sugerencias y control de refrescos
+- ✅ Adivinanza permitida desde la primera pregunta
 """
 
 from flask import Flask, request, jsonify, render_template_string, make_response
@@ -86,7 +88,7 @@ def home():
             <div class="stat-item">✅ Servidor activo en Render</div>
             <div class="stat-item">📊 Endpoints: /api/oracle, /health, /dashboard, /api/dashboard/stats</div>
             <div class="stat-item">⚡ Sistema de métricas activado</div>
-            <div class="stat-item">🎯 Analizador con 60+ patrones</div>
+            <div class="stat-item">🎯 Analizador con 80+ patrones</div>
         </div>
         <a href="/dashboard">📊 IR AL DASHBOARD</a>
         <a href="/health">🔍 HEALTH CHECK</a>
@@ -105,11 +107,18 @@ PERSONAJES_FILE = "personajes.json"
 MAX_PREGUNTAS = 20
 
 # Variable global para mantener el estado de la partida actual
+# Se han añadido campos para el sistema de balance
 current_game = {
     'character': None,
     'questions': [],
     'answers': [],
-    'questions_count': 0
+    'questions_count': 0,
+    # Nuevas variables para balance de sugerencias y pistas
+    'suggestions_used': 0,               # Contador de usos reales de sugerencias (ciclos)
+    'max_suggestions': 5,                 # Límite máximo de usos de sugerencias por partida
+    'suggestion_refresh_count': 0,        # Contador de refrescos en el ciclo actual
+    'max_refresh_per_cycle': 3,            # Máximo de refrescos permitidos sin nueva pregunta
+    'cached_suggestions': []               # Últimas sugerencias generadas para el ciclo actual
 }
 
 
@@ -259,6 +268,10 @@ class Normalizador:
         'superhéroe': 'superheroe',
         'villano': 'villano',
         'antagonista': 'villano',
+        'dios': 'deidad',
+        'diosa': 'deidad',
+        'mitologico': 'mitologico',
+        'leyenda': 'mitologico',
     }
     
     @staticmethod
@@ -330,8 +343,8 @@ class AnalizadorPreguntas:
             return {'answer': 'Sí' if conocido else 'No', 'clarification': ''}
         
         # ========== RIQUEZA ==========
-        if re.search(r'\b(rico|rica|millonario|millonaria|adinerado|tiene (mucho )?dinero|fortuna)\b', pregunta_norm):
-            rico = personaje.get('rico', False)
+        if re.search(r'\b(rico|rica|millonario|millonaria|adinerado|tiene (mucho )?dinero|fortuna|multimillonario|multimillonaria|billones|fortuna colosal)\b', pregunta_norm):
+            rico = personaje.get('rico', False) or personaje.get('fortuna', '') == 'colosal'
             return {'answer': 'Sí' if rico else 'No', 'clarification': ''}
         
         if re.search(r'\b(pobre|sin dinero|pobreza|humilde)\b', pregunta_norm):
@@ -371,14 +384,51 @@ class AnalizadorPreguntas:
             es_detective = personaje.get('profesion') == 'detective'
             return {'answer': 'Sí' if es_detective else 'No', 'clarification': ''}
         
-        # ========== FORMATO (NUEVO) ==========
+        # ========== FORMATO / ORIGEN ==========
         if re.search(r'\b(comic|historieta|viñetas|comics)\b', pregunta_norm):
-            es_comic = personaje.get('formato') == 'comic'
+            es_comic = personaje.get('formato') == 'comic' or personaje.get('origen') == 'comic'
             return {'answer': 'Sí' if es_comic else 'No', 'clarification': ''}
         
         if re.search(r'\b(pelicula|film|cine|películas)\b', pregunta_norm):
-            es_pelicula = personaje.get('formato') == 'pelicula'
+            es_pelicula = personaje.get('formato') == 'pelicula' or personaje.get('origen') == 'pelicula'
             return {'answer': 'Sí' if es_pelicula else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(libro|novela|literatura|obra literaria)\b', pregunta_norm):
+            es_libro = personaje.get('formato') == 'libro' or personaje.get('origen') == 'libro'
+            return {'answer': 'Sí' if es_libro else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(serie de tv|television|serie televisiva)\b', pregunta_norm):
+            es_serie = personaje.get('formato') == 'serie' or personaje.get('origen') == 'television'
+            return {'answer': 'Sí' if es_serie else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(videojuego|juego|consola)\b', pregunta_norm):
+            es_videojuego = personaje.get('formato') == 'videojuego' or personaje.get('origen') == 'videojuego'
+            return {'answer': 'Sí' if es_videojuego else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(anime|animacion japonesa|japonés animado)\b', pregunta_norm):
+            es_anime = personaje.get('formato') == 'anime' or personaje.get('origen') == 'anime'
+            return {'answer': 'Sí' if es_anime else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(dibujos animados|caricatura|animacion occidental)\b', pregunta_norm):
+            es_dibujos = personaje.get('formato') == 'dibujos' or personaje.get('origen') == 'animacion'
+            return {'answer': 'Sí' if es_dibujos else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(internet|web|youtube|tiktok|streamer|influencer)\b', pregunta_norm):
+            es_internet = personaje.get('formato') == 'internet' or personaje.get('origen') == 'web'
+            return {'answer': 'Sí' if es_internet else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(mitologico|mito|leyenda|ser mitologico|criatura mitologica)\b', pregunta_norm):
+            es_mitologico = personaje.get('tipo_ser') == 'mitologico' or personaje.get('especie') in ['dios', 'semidios', 'elfo', 'enano', 'trol']
+            return {'answer': 'Sí' if es_mitologico else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(deidad|dios|diosa|divinidad|ser divino)\b', pregunta_norm):
+            es_deidad = personaje.get('tipo_ser') == 'deidad' or personaje.get('especie') == 'dios'
+            return {'answer': 'Sí' if es_deidad else 'No', 'clarification': ''}
+        
+        # ========== DISNEY ==========
+        if re.search(r'\b(disney|de disney|personaje disney|película de disney)\b', pregunta_norm):
+            es_disney = personaje.get('origen') == 'disney' or 'disney' in personaje.get('universo', '').lower()
+            return {'answer': 'Sí' if es_disney else 'No', 'clarification': ''}
         
         # ========== NACIONALIDAD ==========
         if re.search(r'\b(europa|europeo|europea)\b', pregunta_norm):
@@ -392,6 +442,11 @@ class AnalizadorPreguntas:
         if re.search(r'\b(asia|asiatico|asiatica)\b', pregunta_norm):
             asia = personaje.get('nacionalidad') in ['chino', 'china', 'japones', 'japonesa', 'indio', 'india']
             return {'answer': 'Sí' if asia else 'No', 'clarification': ''}
+        
+        # ========== ÁFRICA ==========
+        if re.search(r'\b(africa|africano|africana)\b', pregunta_norm):
+            africa = personaje.get('nacionalidad') in ['egipcio', 'egipcia', 'etíope', 'nigeriano', 'sudafricano', 'keniata', 'marroquí']
+            return {'answer': 'Sí' if africa else 'No', 'clarification': ''}
         
         # Nacionalidades específicas
         if re.search(r'\b(aleman|alemana|de alemania)\b', pregunta_norm):
@@ -411,6 +466,22 @@ class AnalizadorPreguntas:
             nac = personaje.get('nacionalidad', '').lower()
             return {'answer': 'Sí' if 'estadounidense' in nac or 'americano' in nac else 'No', 'clarification': ''}
         
+        if re.search(r'\b(indio|india|de la india|hindú)\b', pregunta_norm):
+            es_indio = personaje.get('nacionalidad') in ['indio', 'india', 'hindú']
+            return {'answer': 'Sí' if es_indio else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(egipcio|egipcia|de egipto)\b', pregunta_norm):
+            es_egipcio = personaje.get('nacionalidad') in ['egipcio', 'egipcia']
+            return {'answer': 'Sí' if es_egipcio else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(japonés|japonesa|de japón|nipón|anime japonés)\b', pregunta_norm):
+            es_japones = personaje.get('nacionalidad') in ['japonés', 'japonesa'] or personaje.get('origen') == 'anime'
+            return {'answer': 'Sí' if es_japones else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(mexicano|mexicana|de méxico)\b', pregunta_norm):
+            es_mexicano = personaje.get('nacionalidad') == 'mexicano'
+            return {'answer': 'Sí' if es_mexicano else 'No', 'clarification': ''}
+        
         # ========== ÉPOCA ==========
         if re.search(r'\b(antigua|antiguo|de la antiguedad|epoca antigua|antes de cristo)\b', pregunta_norm):
             es_antigua = personaje.get('epoca') == 'antigua' or personaje.get('periodo', {}).get('vivio_antiguedad', False)
@@ -427,6 +498,44 @@ class AnalizadorPreguntas:
         if re.search(r'\b(moderna|moderno|contemporaneo|contemporanea|epoca moderna)\b', pregunta_norm):
             es_moderna = personaje.get('epoca') in ['moderna', 'victoriana', 'contemporanea']
             return {'answer': 'Sí' if es_moderna else 'No', 'clarification': ''}
+        
+        # ========== SIGLOS ==========
+        if re.search(r'\b(siglo|siglos)\b', pregunta_norm):
+            # Extraer número del siglo (romano o arábigo)
+            siglo_match = re.search(r'siglo\s+(\d+|[xxi?v]+)', pregunta_norm)
+            if siglo_match:
+                siglo_str = siglo_match.group(1)
+                # Convertir romano a número (simplificado)
+                romanos = {'i':1, 'ii':2, 'iii':3, 'iv':4, 'v':5, 'vi':6, 'vii':7, 'viii':8, 'ix':9, 'x':10, 'xi':11, 'xii':12, 'xiii':13, 'xiv':14, 'xv':15, 'xvi':16, 'xvii':17, 'xviii':18, 'xix':19, 'xx':20, 'xxi':21}
+                if siglo_str.isdigit():
+                    siglo_num = int(siglo_str)
+                else:
+                    siglo_num = romanos.get(siglo_str.lower(), 0)
+                
+                periodo = personaje.get('periodo', {})
+                siglo_inicio = periodo.get('siglo_inicio', 0)
+                siglo_fin = periodo.get('siglo_fin', 0)
+                
+                if siglo_inicio <= siglo_num <= siglo_fin:
+                    return {'answer': 'Sí', 'clarification': ''}
+                else:
+                    # Si no hay información de siglos, intentar con época
+                    if siglo_num <= 5:
+                        epoca_esperada = 'antigua'
+                    elif siglo_num <= 15:
+                        epoca_esperada = 'medieval'
+                    elif siglo_num <= 18:
+                        epoca_esperada = 'renacimiento'
+                    else:
+                        epoca_esperada = 'moderna'
+                    
+                    if personaje.get('epoca') == epoca_esperada:
+                        return {'answer': 'Sí', 'clarification': f'(vive en época {epoca_esperada})'}
+                    else:
+                        return {'answer': 'No', 'clarification': ''}
+            else:
+                # Pregunta genérica sobre siglo, sin número
+                return {'answer': 'No lo sé', 'clarification': '¿Podrías especificar qué siglo?'}
         
         # ========== UNIVERSOS ==========
         if re.search(r'\b(dc|de dc comics|dc comics)\b', pregunta_norm):
@@ -475,11 +584,15 @@ class AnalizadorPreguntas:
             puede_volar = personaje.get('habilidades', {}).get('vuela', False) or personaje.get('puede_volar', False)
             return {'answer': 'Sí' if puede_volar else 'No', 'clarification': ''}
         
-        if re.search(r'\b(inmortal|vive para siempre|no muere|eterno|eterna|vida eterna)\b', pregunta_norm):
-            inmortal = personaje.get('habilidades', {}).get('es_inmortal', False) or personaje.get('es_inmortal', False)
+        if re.search(r'\b(inmortal|vive para siempre|no muere|eterno|eterna|vida eterna|puede vivir para siempre|no envejece)\b', pregunta_norm):
+            inmortal = personaje.get('habilidades', {}).get('es_inmortal', False) or personaje.get('especie') in ['dios', 'semidiós', 'elfo']
             return {'answer': 'Sí' if inmortal else 'No', 'clarification': ''}
         
         # ========== ARMAS ==========
+        if re.search(r'\b(porta|usa|empuña|lleva) (alguna|un|una)?\s*(arma|armas|espada|lanza|hacha|arco|escopeta|pistola)\b', pregunta_norm):
+            porta = personaje.get('armas_objetos', {}).get('porta_armas', False) or personaje.get('armas_objetos', {}).get('usa_espada', False) or personaje.get('armas_objetos', {}).get('tiene_arco', False)
+            return {'answer': 'Sí' if porta else 'No', 'clarification': ''}
+        
         if re.search(r'\b(arco|tiene arco|usa arco|arquero|arquera)\b', pregunta_norm):
             tiene_arco = personaje.get('armas_objetos', {}).get('tiene_arco', False)
             return {'answer': 'Sí' if tiene_arco else 'No', 'clarification': ''}
@@ -488,15 +601,16 @@ class AnalizadorPreguntas:
             tiene_espada = personaje.get('armas_objetos', {}).get('usa_espada', False)
             return {'answer': 'Sí' if tiene_espada else 'No', 'clarification': ''}
         
-        if re.search(r'\b(porta|usa) (arma|armas)\b', pregunta_norm):
-            porta = personaje.get('armas_objetos', {}).get('porta_armas', False) or personaje.get('armas_objetos', {}).get('usa_armas', False)
-            return {'answer': 'Sí' if porta else 'No', 'clarification': ''}
-        
         if re.search(r'\b(tecnologia avanzada|alta tecnologia|tech)\b', pregunta_norm):
             tech = personaje.get('armas_objetos', {}).get('usa_tecnologia_avanzada', False)
             return {'answer': 'Sí' if tech else 'No', 'clarification': ''}
         
         # ========== LOGROS ==========
+        if re.search(r'\b(premios? importantes|galardones?|distinciones?|reconocimientos?)\b', pregunta_norm):
+            impacto = personaje.get('impacto', {})
+            tiene_premios = len(impacto.get('premios', [])) > 0
+            return {'answer': 'Sí' if tiene_premios else 'No', 'clarification': ''}
+        
         if re.search(r'\b(premio nobel|nobel|gano el nobel)\b', pregunta_norm):
             impacto = personaje.get('impacto', {})
             tiene_nobel = any('nobel' in str(p).lower() for p in impacto.get('premios', []))
@@ -514,6 +628,14 @@ class AnalizadorPreguntas:
             iconico = personaje.get('impacto', {}).get('iconico', False) or personaje.get('impacto', {}).get('figura_iconica', False)
             return {'answer': 'Sí' if iconico else 'No', 'clarification': ''}
         
+        if re.search(r'\b(hizo descubrimientos?|descubrimientos? importantes|aportes a la ciencia|inventos científicos)\b', pregunta_norm):
+            descubrio = personaje.get('impacto', {}).get('hizo_descubrimientos', False)
+            return {'answer': 'Sí' if descubrio else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(descubrimientos científicos?|aportes a la ciencia|inventos científicos)\b', pregunta_norm):
+            descubrio = personaje.get('impacto', {}).get('hizo_descubrimientos', False)
+            return {'answer': 'Sí' if descubrio else 'No', 'clarification': ''}
+        
         # ========== PERFIL MORAL ==========
         if re.search(r'\b(violento|violenta|violencia|agresivo|agresiva)\b', pregunta_norm):
             violento = personaje.get('perfil_moral', {}).get('violento', False)
@@ -523,20 +645,21 @@ class AnalizadorPreguntas:
             pacifista = personaje.get('perfil_moral', {}).get('pacifista', False)
             return {'answer': 'Sí' if pacifista else 'No', 'clarification': ''}
         
-        # NUEVO: CONQUISTADOR
         if re.search(r'\b(conquistador|conquistadora|conquisto)\b', pregunta_norm):
             conquistador = personaje.get('perfil_moral', {}).get('conquistador', False)
             return {'answer': 'Sí' if conquistador else 'No', 'clarification': ''}
         
-        # NUEVO: IMPERIALISTA
         if re.search(r'\b(imperialista|imperio)\b', pregunta_norm):
             imperialista = personaje.get('perfil_moral', {}).get('imperialista', False)
             return {'answer': 'Sí' if imperialista else 'No', 'clarification': ''}
         
-        # NUEVO: LUCHÓ POR LA LIBERTAD
         if re.search(r'\b(lucho por la libertad|luchador de la libertad|defensor de la libertad)\b', pregunta_norm):
             lucho = personaje.get('perfil_moral', {}).get('lucho_libertad', False)
             return {'answer': 'Sí' if lucho else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(religioso|religiosa|sacerdote|monje|monja|clérigo|espiritual|creyente)\b', pregunta_norm):
+            religioso = personaje.get('perfil_moral', {}).get('religioso', False) or 'sacerdote' in personaje.get('profesion', '').lower()
+            return {'answer': 'Sí' if religioso else 'No', 'clarification': ''}
         
         # ========== ROL ==========
         if re.search(r'\b(lider|líder)\b', pregunta_norm):
@@ -547,30 +670,88 @@ class AnalizadorPreguntas:
             gobernante = personaje.get('rol', {}).get('gobernante', False)
             return {'answer': 'Sí' if gobernante else 'No', 'clarification': ''}
         
-        # NUEVO: GENERAL
         if re.search(r'\b(general|general del ejercito|comandante)\b', pregunta_norm):
             general = personaje.get('rol', {}).get('general', False)
             return {'answer': 'Sí' if general else 'No', 'clarification': ''}
         
-        # NUEVO: POLÍTICO
         if re.search(r'\b(politico|política|político)\b', pregunta_norm):
             politico = personaje.get('rol', {}).get('ocupo_cargo_politico', False)
             return {'answer': 'Sí' if politico else 'No', 'clarification': ''}
         
-        # NUEVO: INVENTOR
         if re.search(r'\b(inventor|inventora|invento)\b', pregunta_norm):
             inventor = personaje.get('rol', {}).get('es_inventor', False)
             return {'answer': 'Sí' if inventor else 'No', 'clarification': ''}
         
-        # NUEVO: HÉROE
         if re.search(r'\b(heroe|héroe|heroina|heroína)\b', pregunta_norm):
             heroe = personaje.get('rol', {}).get('heroe', False)
             return {'answer': 'Sí' if heroe else 'No', 'clarification': ''}
         
-        # NUEVO: ANTAGONISTA
         if re.search(r'\b(antagonista|enemigo)\b', pregunta_norm):
             antagonista = personaje.get('rol', {}).get('antagonista', False)
             return {'answer': 'Sí' if antagonista else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(resuelve crímenes|detective|investiga crímenes)\b', pregunta_norm):
+            resuelve = personaje.get('rol', {}).get('detective', False) or personaje.get('profesion') == 'detective'
+            return {'answer': 'Sí' if resuelve else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(emperador|emperatriz|imperial|imperio)\b', pregunta_norm):
+            es_emperador = personaje.get('titulo') == 'emperador' or personaje.get('rol', {}).get('emperador', False)
+            return {'answer': 'Sí' if es_emperador else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(presidente|presidenta|jefe de estado|mandatario)\b', pregunta_norm):
+            es_presidente = personaje.get('rol', {}).get('presidente', False) or personaje.get('cargo') == 'presidente'
+            return {'answer': 'Sí' if es_presidente else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(explorador|exploradora|aventurero|descubridor)\b', pregunta_norm):
+            es_explorador = personaje.get('profesion') in ['explorador', 'aventurero'] or personaje.get('rol', {}).get('explorador', False)
+            return {'answer': 'Sí' if es_explorador else 'No', 'clarification': ''}
+        
+        # ========== ESPECIE / TIPO DE SER ==========
+        if re.search(r'\b(humano|humana|ser humano)\b', pregunta_norm):
+            es_humano = personaje.get('especie') == 'humano' or personaje.get('tipo_ser') == 'humano'
+            return {'answer': 'Sí' if es_humano else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(elfo|elfica|elfo)\b', pregunta_norm):
+            es_elfo = personaje.get('especie') == 'elfo'
+            return {'answer': 'Sí' if es_elfo else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(enano|enana)\b', pregunta_norm):
+            es_enano = personaje.get('especie') == 'enano'
+            return {'answer': 'Sí' if es_enano else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(alien|alienígena|extraterrestre)\b', pregunta_norm):
+            es_alien = personaje.get('especie') in ['alien', 'extraterrestre']
+            return {'answer': 'Sí' if es_alien else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(robot|androide|autómata)\b', pregunta_norm):
+            es_robot = personaje.get('especie') in ['robot', 'androide']
+            return {'answer': 'Sí' if es_robot else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(animal|criatura|bestia)\b', pregunta_norm):
+            es_animal = personaje.get('especie') == 'animal'
+            return {'answer': 'Sí' if es_animal else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(fantasma|espíritu|aparición)\b', pregunta_norm):
+            es_fantasma = personaje.get('especie') == 'fantasma'
+            return {'answer': 'Sí' if es_fantasma else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(dios|diosa|deidad|divinidad)\b', pregunta_norm):
+            es_dios = personaje.get('especie') == 'dios' or personaje.get('tipo_ser') == 'deidad'
+            return {'answer': 'Sí' if es_dios else 'No', 'clarification': ''}
+        
+        if re.search(r'\b(semidiós|semidiosa)\b', pregunta_norm):
+            es_semidios = personaje.get('especie') == 'semidiós'
+            return {'answer': 'Sí' if es_semidios else 'No', 'clarification': ''}
+        
+        # ========== INVENCIBLE ==========
+        if re.search(r'\b(invencible|indestructible|no puede ser derrotado)\b', pregunta_norm):
+            invencible = personaje.get('habilidades', {}).get('es_invencible', False) or personaje.get('especie') in ['dios', 'semidiós']
+            return {'answer': 'Sí' if invencible else 'No', 'clarification': ''}
+        
+        # ========== ESTUDIÓ FÍSICA ==========
+        if re.search(r'\b(estudió física|físico|científico de la física)\b', pregunta_norm):
+            es_fisico = personaje.get('area') == 'física' or personaje.get('profesion') in ['físico', 'científico']
+            return {'answer': 'Sí' if es_fisico else 'No', 'clarification': ''}
         
         # ========== IDEOLOGÍA ==========
         if re.search(r'\b(liberal|progresista)\b', pregunta_norm):
@@ -608,7 +789,7 @@ class GeneradorSugerencias:
     1. Analiza las preguntas y respuestas previas
     2. Extrae el "estado de conocimiento" actual
     3. Diferencia estrictamente entre personajes REALES y FICTICIOS
-    4. Genera sugerencias relevantes según lo que AÚN NO se sabe
+    4. Genera sugerencias jerárquicas: formato → universo → específicas
     5. Filtra preguntas redundantes o ya hechas
     6. Prioriza estratégicamente las preguntas más útiles
     """
@@ -747,15 +928,26 @@ class GeneradorSugerencias:
         ],
         
         # === PARA PERSONAJES FICTICIOS ÚNICAMENTE ===
+        'ficticio_formato': [
+            "¿Es de un libro?",
+            "¿Es de una película?",
+            "¿Es de un cómic?",
+            "¿Es de una serie de TV?",
+            "¿Es de un videojuego?",
+            "¿Es un anime?",
+            "¿Es de dibujos animados?",
+            "¿Es un personaje de internet?",
+            "¿Es un ser mitológico?",
+            "¿Es una deidad?",
+        ],
+        
         'ficticio_universo': [
             "¿Es de DC Comics?",
             "¿Es de Marvel?",
             "¿Es de Star Wars?",
             "¿Es de Harry Potter?",
             "¿Es del Señor de los Anillos?",
-            "¿Es de un libro?",
-            "¿Es de una película?",
-            "¿Es de un cómic?",
+            "¿Es de Disney?",
         ],
         
         'ficticio_tipo_masculino': [
@@ -810,9 +1002,13 @@ class GeneradorSugerencias:
         'ficticio_especie': [
             "¿Es humano?",
             "¿Es un elfo?",
+            "¿Es un enano?",
             "¿Es un alien?",
             "¿Es un robot?",
             "¿Es un semidiós?",
+            "¿Es un dios?",
+            "¿Es un animal?",
+            "¿Es un fantasma?",
             "¿Es de otra especie?",
         ],
         
@@ -838,14 +1034,7 @@ class GeneradorSugerencias:
             "¿Es rico?",
             "¿Tiene mucho dinero?",
             "¿Es pobre?",
-        ],
-        
-        # === FORMATO (NUEVO) ===
-        'formato': [
-            "¿Es de un cómic?",
-            "¿Es de una película?",
-            "¿Es de un libro?",
-            "¿Es de una serie de TV?",
+            "¿Es multimillonario?",
         ],
     }
     
@@ -947,20 +1136,13 @@ class GeneradorSugerencias:
                     conocimiento['genero'] = 'masculino'
                     conocimiento['genero_descartado'] = 'femenino'
             
-            # === FORMATO (NUEVO) ===
-            if re.search(r'\b(comic|historieta|comics)\b', pregunta_norm):
+            # === FORMATO / ORIGEN ===
+            if re.search(r'\b(comic|historieta|pelicula|film|cine|libro|serie|tv|television|videojuego|anime|dibujos|internet|web)\b', pregunta_norm):
                 if es_afirmativa:
                     conocimiento['formato_conocido'] = True
-                    conocimiento['formato'] = 'comic'
+                    # Aquí podríamos extraer el formato específico, pero por simplicidad solo marcamos conocido
                 elif es_negativa:
-                    conocimiento['formato'] = 'no_comic'
-                    
-            elif re.search(r'\b(pelicula|film|cine|películas)\b', pregunta_norm):
-                if es_afirmativa:
-                    conocimiento['formato_conocido'] = True
-                    conocimiento['formato'] = 'pelicula'
-                elif es_negativa:
-                    conocimiento['formato'] = 'no_pelicula'
+                    conocimiento['formato'] = 'no_formato'
             
             # === TIPO FICTICIO ESPECÍFICO ===
             if re.search(r'\b(superheroe|superhéroe)\b', pregunta_norm):
@@ -1020,7 +1202,7 @@ class GeneradorSugerencias:
                     conocimiento['epoca_conocida'] = True
                 
                 # === NACIONALIDAD ESPECÍFICA ===
-                if re.search(r'\b(aleman|frances|ingles|italiano|espanol|estadounidense|mexicano|chino|japones)\b', pregunta_norm):
+                if re.search(r'\b(aleman|frances|ingles|italiano|espanol|estadounidense|mexicano|chino|japones|indio|egipcio)\b', pregunta_norm):
                     conocimiento['nacionalidad_conocida'] = True
                 
                 # === UNIVERSO FICTICIO ===
@@ -1046,7 +1228,7 @@ class GeneradorSugerencias:
                     conocimiento['armas_conocidas'] = True
                 
                 # === ESPECIE ===
-                if re.search(r'\b(humano|elfo|alien|robot|semidios)\b', pregunta_norm):
+                if re.search(r'\b(humano|elfo|enano|alien|robot|semidios|dios|animal|fantasma)\b', pregunta_norm):
                     conocimiento['especie_conocida'] = True
                 
                 # === FÍSICO ===
@@ -1062,7 +1244,7 @@ class GeneradorSugerencias:
                     conocimiento['fisico_conocido'].add('bajo')
                 
                 # === ECONOMÍA ===
-                if re.search(r'\b(rico|pobre|dinero)\b', pregunta_norm):
+                if re.search(r'\b(rico|pobre|dinero|multimillonario)\b', pregunta_norm):
                     conocimiento['economia_conocida'] = True
                 
                 # === LOGROS ===
@@ -1070,11 +1252,11 @@ class GeneradorSugerencias:
                     conocimiento['logros_conocidos'] = True
                 
                 # === ROL ===
-                if re.search(r'\b(lider|gobernante|general|presidente|rey|reina)\b', pregunta_norm):
+                if re.search(r'\b(lider|gobernante|general|presidente|rey|reina|emperador|explorador)\b', pregunta_norm):
                     conocimiento['rol_conocido'] = True
                 
                 # === MORAL ===
-                if re.search(r'\b(pacifista|conquistador|libertad|violento)\b', pregunta_norm):
+                if re.search(r'\b(pacifista|conquistador|libertad|violento|religioso)\b', pregunta_norm):
                     conocimiento['moral_conocido'] = True
         
         return conocimiento
@@ -1126,6 +1308,14 @@ class GeneradorSugerencias:
         
         # === PARA PERSONAJES FICTICIOS ===
         elif tipo == 'ficticio':
+            # Primero: formato (si no se conoce)
+            if not conocimiento['formato_conocido']:
+                perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_formato'])
+            
+            # Luego: universo (si no se conoce)
+            if not conocimiento['universo_conocido']:
+                perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_universo'])
+            
             # Tipo específico (si no se conoce) - con género
             if not conocimiento['tipo_ficticio_conocido']:
                 if conocimiento['genero'] == 'femenino':
@@ -1133,7 +1323,7 @@ class GeneradorSugerencias:
                 else:
                     perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_tipo_masculino'])
             
-            # Poderes (si no se conocen) - neutro
+            # Poderes (si no se conocen)
             if not conocimiento['poderes_conocidos']:
                 perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_poderes_masculino'])  # Neutro
             
@@ -1145,26 +1335,8 @@ class GeneradorSugerencias:
             if not conocimiento['especie_conocida']:
                 perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_especie'])
             
-            # Universo (si no se conoce y no se ha filtrado por tipo)
-            if not conocimiento['universo_conocido']:
-                # Si es superhéroe, priorizar universos de cómics
-                if conocimiento.get('tipo_ficticio') == 'superheroe':
-                    perfiladas.extend([
-                        "¿Es de DC Comics?",
-                        "¿Es de Marvel?",
-                    ])
-                # Si es mago, priorizar universos de fantasía
-                elif conocimiento.get('tipo_ficticio') == 'mago':
-                    perfiladas.extend([
-                        "¿Es de Harry Potter?",
-                        "¿Es del Señor de los Anillos?",
-                    ])
-                else:
-                    perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_universo'])
-            
-            # Formato (si no se conoce)
-            if not conocimiento['formato_conocido']:
-                perfiladas.extend(GeneradorSugerencias.PREGUNTAS['formato'])
+            # Rol
+            perfiladas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_rol'])
         
         # Filtrar preguntas ya hechas
         resultado = []
@@ -1263,22 +1435,23 @@ class GeneradorSugerencias:
         # === RAMA PARA PERSONAJES FICTICIOS ===
         elif conocimiento['tipo'] == 'ficticio':
             
-            # UNIVERSO - FILTRADO POR TIPO DE PERSONAJE
+            # FORMATO - PRIORIDAD ALTA
+            if not conocimiento['formato_conocido']:
+                candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_formato'])
+            
+            # UNIVERSO - después de conocer el formato
             if not conocimiento['universo_conocido']:
                 # Si es superhéroe, priorizar universos de cómics
                 if conocimiento.get('tipo_ficticio') == 'superheroe':
                     candidatas.extend([
                         "¿Es de DC Comics?",
                         "¿Es de Marvel?",
-                        "¿Es de un cómic?"
                     ])
                 # Si es mago, priorizar universos de fantasía
                 elif conocimiento.get('tipo_ficticio') == 'mago':
                     candidatas.extend([
                         "¿Es de Harry Potter?",
                         "¿Es del Señor de los Anillos?",
-                        "¿Usa magia?",
-                        "¿Tiene una varita?"
                     ])
                 # Si es villano, puede ser de cualquier universo
                 else:
@@ -1303,10 +1476,6 @@ class GeneradorSugerencias:
             if not conocimiento['especie_conocida']:
                 candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_especie'])
             
-            # Formato (si no se conoce)
-            if not conocimiento['formato_conocido']:
-                candidatas.extend(GeneradorSugerencias.PREGUNTAS['formato'])
-            
             # Rol
             candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_rol'])
         
@@ -1316,7 +1485,7 @@ class GeneradorSugerencias:
                 candidatas.extend(GeneradorSugerencias.PREGUNTAS['real_fama'])
             candidatas.extend(GeneradorSugerencias.PREGUNTAS['real_continente'][:2])
             candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_universo'][:2])
-            candidatas.extend(GeneradorSugerencias.PREGUNTAS['formato'][:2])
+            candidatas.extend(GeneradorSugerencias.PREGUNTAS['ficticio_formato'][:2])
             
             if conocimiento['genero'] == 'masculino':
                 candidatas.extend(GeneradorSugerencias.PREGUNTAS['real_profesion_masculino'][:3])
@@ -1351,14 +1520,16 @@ class GeneradorSugerencias:
                     'masculino', 'femenino', 'hombre', 'mujer', 'dama', 
                     'vivo', 'muerto', 'fallecio', 
                     'famoso', 'conocido', 'mundialmente', 'celebre', 'reconocido',
-                    'rico', 'pobre', 'millonario', 'dinero', 'fortuna',
+                    'rico', 'pobre', 'millonario', 'dinero', 'fortuna', 'multimillonario',
                     'cientifico', 'artista', 'escritor', 'pintor', 'militar', 'politico',
                     'europa', 'europeo', 'america', 'americano', 'asia', 'asiatico', 'africa',
                     'dc', 'marvel', 'star', 'wars', 'harry', 'potter', 'senor', 'anillos',
                     'poderes', 'superpoderes', 'volar', 'inmortal', 'magia',
                     'arco', 'espada', 'arma', 'gafas', 'barba', 'calvo', 'alto', 'bajo',
                     'antiguedad', 'medieval', 'renacimiento', 'moderna', 'contemporaneo',
-                    'comic', 'pelicula', 'libro', 'serie'
+                    'comic', 'pelicula', 'libro', 'serie', 'videojuego', 'anime', 'disney',
+                    'humano', 'elfo', 'enano', 'alien', 'robot', 'dios', 'semidios', 'animal', 'fantasma',
+                    'emperador', 'presidente', 'explorador'
                 }
                 
                 palabras_comunes = palabras_candidata & palabras_pregunta & palabras_especificas
@@ -1380,7 +1551,7 @@ class GeneradorSugerencias:
                     continue
             
             if conocimiento['tipo'] == 'real':
-                if any(palabra in candidata_norm for palabra in ['ficticio', 'imaginario', 'inventado', 'comic', 'pelicula', 'dc', 'marvel']):
+                if any(palabra in candidata_norm for palabra in ['ficticio', 'imaginario', 'inventado', 'comic', 'pelicula', 'dc', 'marvel', 'disney', 'anime']):
                     continue
             elif conocimiento['tipo'] == 'ficticio':
                 if any(palabra in candidata_norm for palabra in ['real', 'existio', 'historico']):
@@ -1427,7 +1598,12 @@ def oracle_endpoint():
                 'character': None,
                 'questions': [],
                 'answers': [],
-                'questions_count': 0
+                'questions_count': 0,
+                'suggestions_used': 0,
+                'max_suggestions': 5,
+                'suggestion_refresh_count': 0,
+                'max_refresh_per_cycle': 3,
+                'cached_suggestions': []
             }
             personaje = random.choice(PERSONAJES)
             current_game['character'] = personaje
@@ -1453,8 +1629,11 @@ def oracle_endpoint():
             current_game['questions'].append(pregunta)
             current_game['answers'].append(resultado['answer'])
             current_game['questions_count'] += 1
-            
             metricas_manager.registrar_pregunta(pregunta)
+
+            # Reiniciar contador de refrescos de sugerencias al hacer una nueva pregunta
+            current_game['suggestion_refresh_count'] = 0
+            current_game['cached_suggestions'] = []
             
             return jsonify(resultado)
         
@@ -1462,37 +1641,81 @@ def oracle_endpoint():
         elif action == 'suggestions':
             if not current_game.get('character'):
                 return jsonify({'suggestions': []})
-            
-            sugerencias = GeneradorSugerencias.generar(
-                current_game['questions'],
-                current_game['answers'],
-                max_sugerencias=5
-            )
-            
+
+            # Verificar límite de usos (ciclos) de sugerencias
+            if current_game['suggestions_used'] >= current_game['max_suggestions']:
+                return jsonify({
+                    'suggestions': [],
+                    'disabled': True,
+                    'reason': 'limit_reached'
+                })
+
+            # Determinar si podemos generar nuevas sugerencias o usar las cacheadas
+            if current_game['suggestion_refresh_count'] < current_game['max_refresh_per_cycle']:
+                # Es un nuevo ciclo si el contador de refrescos es 0
+                if current_game['suggestion_refresh_count'] == 0:
+                    # Incrementar usos solo cuando se inicia un nuevo ciclo (primera vez después de una pregunta)
+                    current_game['suggestions_used'] += 1
+
+                # Generar nuevas sugerencias
+                sugerencias = GeneradorSugerencias.generar(
+                    current_game['questions'],
+                    current_game['answers'],
+                    max_sugerencias=5
+                )
+                # Guardar en caché
+                current_game['cached_suggestions'] = sugerencias
+                # Incrementar contador de refrescos
+                current_game['suggestion_refresh_count'] += 1
+            else:
+                # Usar sugerencias cacheadas (ya no se generan nuevas hasta la próxima pregunta)
+                sugerencias = current_game['cached_suggestions']
+
             return jsonify({'suggestions': sugerencias})
         
         # ===== HINT =====
         elif action == 'hint':
             if not current_game.get('character'):
                 return jsonify({'hint': 'No hay partida activa'})
-            
+
             pistas = current_game['character'].get('pistas', [])
             hint_level = data.get('hint_level', 1)
-            
-            # CORREGIDO: Usar hint_level en lugar de random.choice
+            questions_count = current_game['questions_count']
+
+            # Verificar desbloqueo por número de preguntas
+            if questions_count < 5:
+                return jsonify({
+                    'hint': None,
+                    'locked': True,
+                    'required_turn': 5
+                })
+            elif questions_count < 10:
+                # Solo permitir pista 1 (hint_level=1)
+                if hint_level != 1:
+                    return jsonify({
+                        'hint': None,
+                        'locked': True,
+                        'required_turn': 5
+                    })
+            # Para 10 o más preguntas, se permite hint_level 1 o 2 (según disponibilidad)
+
+            # Obtener la pista según hint_level (igual que antes)
             if hint_level == 1 and len(pistas) > 0:
                 hint = pistas[0]
             elif hint_level == 2 and len(pistas) > 1:
                 hint = pistas[1]
             else:
                 hint = "No hay más pistas disponibles."
-            
+
             return jsonify({'hint': hint})
         
         # ===== GUESS =====
         elif action == 'guess':
             if not current_game.get('character'):
                 return jsonify({'error': 'No hay partida activa'}), 404
+
+            if current_game['questions_count'] < 1:
+                return jsonify({'error': 'must_ask_before_guess'}), 400
             
             guess = data.get('guess', '').strip().lower()
             nombre_real = current_game['character']['nombre'].lower()
@@ -2072,17 +2295,21 @@ def dashboard():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🧠 THE ORACLE - Backend MEJORADO v4.2 ULTRA [RENDER]")
+    print("🧠 THE ORACLE - Backend MEJORADO v4.3 ULTRA + BALANCE [LOCAL]")
     print("=" * 60)
-    print(f"📡 Servidor: http://0.0.0.0:{os.environ.get('PORT', 10000)}")
+    print(f"📡 Servidor: http://0.0.0.0:5000")
     print(f"🎭 Personajes: {len(PERSONAJES)}")
-    print(f"📊 Dashboard: /dashboard")
+    print(f"📊 Dashboard: http://0.0.0.0:5000/dashboard")
+    print(f"📊 Dashboard Local: http://localhost:5000/dashboard")
     print("✅ Sistema de métricas ACTIVADO")
-    print("✅ Analizador con 60+ patrones")
-    print("✅ Modo PRODUCCIÓN (debug=False)")
+    print("✅ Analizador con 80+ patrones (nuevos: especie, formato, títulos)")
+    print("✅ Sugerencias jerárquicas: formato → universo → específicas")
+    print("✅ Límite de sugerencias (5 usos) y control de refrescos (3 por ciclo)")
+    print("✅ Pistas desbloqueadas por número de preguntas (5 y 10)")
+    print("✅ Adivinanza permitida desde la primera pregunta")
+    print("✅ Modo DEBUG activado")
     print("=" * 60)
     
-    # PUERTO PARA RENDER (dinámico desde variable de entorno)
+   # Puerto para producción
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
