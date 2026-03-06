@@ -7,7 +7,7 @@
 const config = {
     questionsLimit: 20,
     typewriterSpeed: 20,
-    backendURL: 'https://the-mind-duel.onrender.com',
+    backendURL: 'https://the-mind-duel.onrender.com/api/oracle',
     suggestionsAfterQuestion: 2,
     hintsAfterQuestion: 5,
     maxHints: 2
