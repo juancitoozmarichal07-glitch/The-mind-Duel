@@ -219,27 +219,66 @@ metricas_manager = MetricasManager()
 
 
 # ===================================================================
-# REGISTRO DE HUECOS
+# REGISTRO DE HUECOS MEJORADO (con manejo de corrupción y escritura atómica)
 # ===================================================================
 
 def registrar_hueco(pregunta: str, personaje: Dict, pregunta_normalizada: str):
+    """
+    Registra una pregunta no comprendida con escritura atómica y manejo de corrupción.
+    """
     try:
+        # Validar que la pregunta sea una cadena no vacía
+        if not pregunta or not isinstance(pregunta, str):
+            print(f"⚠️ Intento de registrar hueco con pregunta inválida: {repr(pregunta)}")
+            return
+
+        pregunta = pregunta.strip()
+        if not pregunta:
+            print(f"⚠️ Intento de registrar hueco con pregunta vacía")
+            return
+
+        # Leer huecos existentes con manejo de error
         huecos = []
         if os.path.exists(REGISTRO_HUECOS_FILE):
-            with open(REGISTRO_HUECOS_FILE, 'r', encoding='utf-8') as f:
-                huecos = json.load(f)
-        
+            try:
+                with open(REGISTRO_HUECOS_FILE, 'r', encoding='utf-8') as f:
+                    huecos = json.load(f)
+                    # Asegurar que sea una lista
+                    if not isinstance(huecos, list):
+                        huecos = []
+            except json.JSONDecodeError:
+                # Archivo corrupto: lo renombramos y empezamos de cero
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup = f"{REGISTRO_HUECOS_FILE}.corrupto_{timestamp}"
+                os.rename(REGISTRO_HUECOS_FILE, backup)
+                print(f"⚠️ Archivo de huecos corrupto. Respaldado como: {backup}")
+                huecos = []
+            except Exception as e:
+                print(f"❌ Error leyendo huecos: {e}")
+                huecos = []
+
+        # Agregar nuevo hueco
         huecos.append({
             "timestamp": datetime.now().isoformat(),
             "pregunta": pregunta,
             "pregunta_normalizada": pregunta_normalizada,
             "personaje": personaje.get('nombre', 'Desconocido')
         })
-        
-        with open(REGISTRO_HUECOS_FILE, 'w', encoding='utf-8') as f:
+
+        # Limitar tamaño (opcional pero recomendado)
+        if len(huecos) > 1000:
+            huecos = huecos[-1000:]
+
+        # Escritura atómica: primero a temporal, luego reemplazar
+        temp_file = REGISTRO_HUECOS_FILE + ".tmp"
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(huecos, f, ensure_ascii=False, indent=2)
+        os.replace(temp_file, REGISTRO_HUECOS_FILE)  # Atómico en Unix
+
     except Exception as e:
-        print(f"Error registrando hueco: {e}")
+        print(f"❌ Error crítico en registrar_hueco: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 # ===================================================================
@@ -297,7 +336,7 @@ class Normalizador:
 
 
 # ===================================================================
-# ANALIZADOR DE PREGUNTAS MEJORADO CON REGEX Y MEMORIA
+# ANALIZADOR DE PREGUNTAS MEJORADO CON REGEX, MEMORIA Y NUEVAS CATEGORÍAS
 # ===================================================================
 
 class AnalizadorPreguntas:
@@ -321,6 +360,10 @@ class AnalizadorPreguntas:
         'profesion_politica': ['político', 'política', 'presidente', 'presidenta', 'gobernante', 'líder', 'emperador', 'emperatriz', 'rey', 'reina', 'monarca'],
         'profesion_militar': ['militar', 'soldado', 'guerrero', 'guerrera', 'general', 'conquistador'],
         'profesion_otros': ['inventor', 'inventora', 'detective', 'explorador', 'exploradora', 'mago', 'maga', 'sacerdote'],
+        'musico': ['músico', 'musico', 'cantante', 'cantar'],
+        'matematico': ['matemático', 'matematico', 'matemática', 'matematica'],
+        'inteligente': ['inteligente', 'genio', 'brillante', 'sabio'],
+        'objeto': ['objeto', 'cosa', 'artefacto'],
         'poderes': ['poderes', 'superpoderes', 'volar', 'vuela', 'inmortal', 'inmortalidad', 'fuerza sobrehumana', 'magia', 'habilidades especiales'],
         'armas': ['arma', 'armas', 'espada', 'arco', 'lanza', 'escudo', 'martillo', 'gadgets', 'tecnología avanzada'],
         'fisico': ['gafas', 'lentes', 'anteojos', 'barba', 'bigote', 'calvo', 'alto', 'bajo', 'estatura', 'pelo'],
@@ -376,6 +419,10 @@ class AnalizadorPreguntas:
                     'profesion_politica': "Ya preguntaste sobre cargos políticos.",
                     'profesion_militar': "Ya preguntaste sobre su faceta militar.",
                     'profesion_otros': "Ya preguntaste sobre otras profesiones.",
+                    'musico': "Ya preguntaste sobre música o canto.",
+                    'matematico': "Ya preguntaste sobre matemáticas.",
+                    'inteligente': "Ya preguntaste sobre inteligencia.",
+                    'objeto': "Ya preguntaste si es un objeto.",
                     'poderes': "Ya preguntaste si tiene poderes o habilidades.",
                     'armas': "Ya preguntaste si usa armas o artefactos.",
                     'fisico': "Ya preguntaste sobre características físicas.",
@@ -435,6 +482,14 @@ class AnalizadorPreguntas:
     
     @staticmethod
     def analizar(pregunta: str, personaje: Dict, preguntas_previas: List[str] = None, respuestas_previas: List[str] = None) -> Dict:
+        # Validar que la pregunta sea válida
+        if not pregunta or not isinstance(pregunta, str):
+            return {'answer': 'No lo sé', 'clarification': 'No entendí la pregunta.'}
+        
+        pregunta = pregunta.strip()
+        if not pregunta:
+            return {'answer': 'No lo sé', 'clarification': 'No entendí la pregunta.'}
+        
         pregunta_norm = Normalizador.normalizar(pregunta)
         
         # Verificar memoria contextual
@@ -450,13 +505,18 @@ class AnalizadorPreguntas:
                 return {'answer': 'Cuidado', 'clarification': mensaje_contradiccion}
         
         # ========== TIPO ==========
-        if re.search(r'\b(real|existio|historico|carne y hueso|de verdad)\b', pregunta_norm):
+        if re.search(r'\b(real|existio|historico|carne y hueso|de verdad|existió|existía)\b', pregunta_norm):
             es_real = personaje.get('tipo') == 'real'
             return {'answer': 'Sí' if es_real else 'No', 'clarification': ''}
         
-        if re.search(r'\b(ficticio|inventado|imaginario|ficcion|fantasia|ser imaginario)\b', pregunta_norm):
+        if re.search(r'\b(ficticio|inventado|imaginario|ficcion|fantasia|ser imaginario|es un personaje|es personaje)\b', pregunta_norm):
             es_ficticio = personaje.get('tipo') == 'ficticio'
             return {'answer': 'Sí' if es_ficticio else 'No', 'clarification': ''}
+        
+        # ========== OBJETO (NUEVO) ==========
+        if re.search(r'\b(es un objeto|es objeto|es una cosa|es cosa)\b', pregunta_norm):
+            es_objeto = personaje.get('tipo') == 'objeto'
+            return {'answer': 'Sí' if es_objeto else 'No', 'clarification': ''}
         
         # ========== GÉNERO ==========
         if re.search(r'\b(masculino|es (un )?hombre|sexo masculino|del sexo masculino|es (un )?tipo|varon)\b', pregunta_norm):
@@ -526,6 +586,21 @@ class AnalizadorPreguntas:
         if re.search(r'\b(detective|investigador privado|investigadora privada)\b', pregunta_norm):
             es_detective = personaje.get('profesion') == 'detective'
             return {'answer': 'Sí' if es_detective else 'No', 'clarification': ''}
+        
+        # ========== MÚSICO / CANTANTE (NUEVO) ==========
+        if re.search(r'\b(es músico|musico|es cantante|cantante|compositor|interpreta música)\b', pregunta_norm):
+            es_musico = personaje.get('profesion') in ['músico', 'musico', 'cantante', 'compositor']
+            return {'answer': 'Sí' if es_musico else 'No', 'clarification': ''}
+        
+        # ========== MATEMÁTICO (NUEVO) ==========
+        if re.search(r'\b(es matemático|matematico|es matemática|matematica|estudió matemáticas)\b', pregunta_norm):
+            es_matematico = personaje.get('profesion') in ['matemático', 'matematico', 'matemática', 'matematica']
+            return {'answer': 'Sí' if es_matematico else 'No', 'clarification': ''}
+        
+        # ========== INTELIGENTE (NUEVO) ==========
+        if re.search(r'\b(es inteligente|inteligente|se destaca por su inteligencia|es genio|es brillante|es sabio)\b', pregunta_norm):
+            es_inteligente = personaje.get('rasgos', {}).get('inteligente', False) or personaje.get('profesion') in ['cientifico', 'matematico', 'fisico', 'filósofo']
+            return {'answer': 'Sí' if es_inteligente else 'No', 'clarification': ''}
         
         # ========== FORMATO / ORIGEN ==========
         if re.search(r'\b(comic|historieta|viñetas|comics)\b', pregunta_norm):
@@ -911,8 +986,13 @@ class AnalizadorPreguntas:
             fuerza = personaje.get('habilidades', {}).get('fuerza_sobrehumana', False)
             return {'answer': 'Sí' if fuerza else 'No', 'clarification': ''}
         
-        # NO CLASIFICABLE
-        registrar_hueco(pregunta, personaje, pregunta_norm)
+        # ========== NO CLASIFICABLE ==========
+        # Solo registrar si la pregunta es válida
+        if pregunta and isinstance(pregunta, str) and pregunta.strip():
+            registrar_hueco(pregunta, personaje, pregunta_norm)
+        else:
+            print(f"⚠️ analizar: pregunta inválida, no se registra hueco: {repr(pregunta)}")
+        
         return {'answer': 'No lo sé', 'clarification': 'No estoy seguro de cómo interpretar eso. ¿Podrías reformularlo?'}
 
 
@@ -1761,6 +1841,9 @@ def oracle_endpoint():
                 return jsonify({'error': 'No hay partida activa'}), 404
             
             pregunta = data.get('question', '')
+            if not pregunta or not isinstance(pregunta, str):
+                pregunta = ""
+            
             personaje = current_game['character']
             
             # Usar el analizador con memoria contextual
@@ -1935,22 +2018,43 @@ def dashboard_stats():
 
 @app.route('/api/dashboard/huecos', methods=['GET'])
 def dashboard_huecos():
-    """Endpoint mejorado con análisis de huecos"""
+    """Endpoint mejorado con análisis de huecos y manejo de archivos corruptos"""
     try:
+        limit = request.args.get('limit', 50, type=int)
         huecos = []
-        if os.path.exists(REGISTRO_HUECOS_FILE):
-            with open(REGISTRO_HUECOS_FILE, 'r', encoding='utf-8') as f:
-                huecos = json.load(f)
         
-        # Contar preguntas más frecuentes
+        if os.path.exists(REGISTRO_HUECOS_FILE):
+            try:
+                with open(REGISTRO_HUECOS_FILE, 'r', encoding='utf-8') as f:
+                    huecos = json.load(f)
+            except json.JSONDecodeError:
+                # Archivo corrupto: lo renombramos
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup = f"{REGISTRO_HUECOS_FILE}.corrupto_{timestamp}"
+                os.rename(REGISTRO_HUECOS_FILE, backup)
+                print(f"⚠️ dashboard_huecos: archivo corrupto respaldado como {backup}")
+                huecos = []  # Empezamos con lista vacía
+            except Exception as e:
+                print(f"❌ Error leyendo huecos: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        # Asegurar que huecos sea una lista
+        if not isinstance(huecos, list):
+            huecos = []
+        
+        # Contar preguntas más frecuentes (solo las válidas)
         preguntas_counter = Counter()
         personajes_counter = Counter()
         
         for hueco in huecos:
-            pregunta = hueco.get('pregunta_normalizada', hueco.get('pregunta', ''))
+            if not isinstance(hueco, dict):
+                continue
+            pregunta = hueco.get('pregunta_normalizada') or hueco.get('pregunta', '')
             personaje = hueco.get('personaje', 'Desconocido')
-            preguntas_counter[pregunta] += 1
-            personajes_counter[personaje] += 1
+            if pregunta and isinstance(pregunta, str):
+                preguntas_counter[pregunta] += 1
+            if personaje:
+                personajes_counter[personaje] += 1
         
         # Top 20 preguntas más frecuentes
         preguntas_frecuentes = preguntas_counter.most_common(20)
@@ -1958,12 +2062,16 @@ def dashboard_huecos():
         # Top 10 personajes más problemáticos
         personajes_problematicos = personajes_counter.most_common(10)
         
+        # Últimos N huecos (ordenados por timestamp)
+        huecos_ordenados = sorted(huecos, key=lambda x: x.get('timestamp', ''), reverse=True)
+        ultimos = huecos_ordenados[:limit] if huecos_ordenados else []
+        
         return jsonify({
             'total': len(huecos),
-            'huecos': huecos,
+            'huecos': huecos,  # opcional, podés quitarlo si es muy grande
             'preguntas_frecuentes': preguntas_frecuentes,
             'personajes_problematicos': personajes_problematicos,
-            'ultimos': huecos[-50:] if len(huecos) > 50 else huecos
+            'ultimos': ultimos
         })
     except Exception as e:
         print(f"Error en dashboard_huecos: {e}")
@@ -2447,17 +2555,15 @@ if __name__ == '__main__':
     print(f"📊 Dashboard: http://0.0.0.0:5000/dashboard")
     print(f"📊 Dashboard Local: http://localhost:5000/dashboard")
     print("✅ Sistema de métricas ACTIVADO")
-    print("✅ Analizador con 80+ patrones (nuevos: especie, formato, títulos)")
+    print("✅ Analizador con 80+ patrones (nuevos: especie, formato, títulos, músico, matemático, inteligente, objeto)")
     print("✅ Sugerencias jerárquicas: formato → universo → específicas")
     print("✅ Límite de sugerencias (5 usos) y control de refrescos (3 por ciclo)")
     print("✅ Pistas desbloqueadas por número de preguntas (5 y 10)")
     print("✅ Adivinanza permitida desde la primera pregunta")
     print("✅ Memoria contextual del cerebro (detecta repeticiones por categoría semántica)")
+    print("✅ Manejo robusto de huecos (archivos corruptos y escritura atómica)")
     print("✅ Modo DEBUG activado")
     print("=" * 60)
     
-    # Para producción con Gunicorn
-if __name__ == '__main__':
-    import os
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # VERSIÓN LOCAL - Puerto fijo 5000 con debug=True
+    app.run(host='0.0.0.0', port=5000, debug=True)
