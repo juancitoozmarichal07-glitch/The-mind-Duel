@@ -139,7 +139,7 @@ function generateSound(type) {
             // Crear nuevo elemento de audio con el MP3
             backgroundAudio = new Audio('mind_ambient.mp3');
             backgroundAudio.loop = true;        // Repetir infinito
-            backgroundAudio.volume = 0.3;        // Volumen suave
+            backgroundAudio.volume = 0.15;        // Volumen suave
             
             // Intentar reproducir (puede ser bloqueado por autoplay)
             backgroundAudio.play().catch(e => {
